@@ -15,3 +15,7 @@ __pycache__/
 venv/
 .env
 .DS_Store
+
+# Trained models: retrain on the target machine (python3 -m model.train)
+model/*.pkl
+model/*_metrics.json
