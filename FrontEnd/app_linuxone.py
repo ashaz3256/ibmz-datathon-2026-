@@ -28,7 +28,10 @@ import requests
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "agent"))
 import risk_bridge                                  # noqa: E402  Sourov's model + reasons/what-ifs
-from agent import run_agent, build_facts, BANNED_PHRASES  # noqa: E402  Granite agent with safety rules
+from agent import run_agent, build_facts, BANNED_PHRASES, stream_chat  # noqa: E402  Granite agent + safety rules
+
+# Granite has 3 CPUs: only one question at a time, otherwise requests pile up and all time out
+GRANITE_LOCK = threading.Lock()
 
 LLM_URL = os.environ.get("LLM_URL", "http://localhost:8080/v1/chat/completions")
 LLM_BASE = LLM_URL.split("/v1/")[0]
@@ -120,7 +123,8 @@ def AIAutoCategorize(merchant_name):
         f"Merchant Name: {merchant_name}\nCategory:"
     )
     try:
-        category = granite_chat([{"role": "user", "content": prompt}], max_tokens=10, temperature=0.0, timeout=60)
+        with GRANITE_LOCK:  # wait our turn so we don't clash with a plan or chat answer
+            category = granite_chat([{"role": "user", "content": prompt}], max_tokens=10, temperature=0.0, timeout=60)
         result = "Discretionary"
         for valid in ["Groceries", "Transport", "Utilities", "Entertainment", "Salary", "Rent", "Discretionary"]:
             if valid.lower() in category.lower():
@@ -403,32 +407,40 @@ def HandleAIQuery(event=None):
     if not check_granite():
         AIBox.insert(tk.END, "Granite is offline. Start it on the VM with: bash agent/setup_granite.sh serve\n")
         return
+    if not GRANITE_LOCK.acquire(blocking=False):
+        AIBox.insert(tk.END, "Granite is busy with another answer. Please wait for it to finish, then ask again.\n")
+        return
 
-    AIBox.insert(tk.END, "Granite is thinking (running on this LinuxONE VM)... can take a minute...\n")
+    AIBox.insert(tk.END, "Granite (running on this LinuxONE VM):\n")
+    AIBox.see(tk.END)
+
+    def show(piece):
+        def add():
+            AIBox.insert(tk.END, piece)
+            AIBox.see(tk.END)
+        window.after(0, add)
 
     def ai_background_task():
         try:
             context = current_financial_context
             if current_case:
                 context += "\n\nRisk model result:\n" + build_facts(current_case)
-            reply = granite_chat(
+            reply = stream_chat(
                 [{"role": "system", "content": CHAT_RULES + "\n\nCUSTOMER DATA:\n" + context},
                  {"role": "user", "content": user_query}],
-                max_tokens=350, temperature=0.2)
+                max_tokens=250, temperature=0.2, on_token=show)
             low = reply.lower()
-            bad = [p for p in BANNED_PHRASES if p in low]
-            if bad:
-                reply = ("I can't recommend that. Taking on more credit can make things harder. "
-                         "For free, confidential help with debts, contact StepChange on 0800 138 1111 "
-                         "or Citizens Advice. (Granite's reply was blocked by the safety check.)")
-
-            def update_ai_box():
-                AIBox.insert(tk.END, f"Granite:\n{reply}\n\n" + "=" * 60 + "\n")
-            window.after(0, update_ai_box)
+            if any(p in low for p in BANNED_PHRASES):
+                show("\n\n[Safety check: that reply suggested something we never recommend, so ignore it.]\n"
+                     "Taking on more credit can make things harder. For free, confidential help with debts, "
+                     "contact StepChange on 0800 138 1111 or Citizens Advice.")
+            show("\n\n" + "=" * 60 + "\n")
         except Exception as ex:
             err_type = type(ex).__name__
             err_msg = str(ex)
-            window.after(0, lambda: AIBox.insert(tk.END, f"Error generating AI response: {err_type}: {err_msg}\n"))
+            window.after(0, lambda: AIBox.insert(tk.END, f"\nError generating AI response: {err_type}: {err_msg}\n"))
+        finally:
+            GRANITE_LOCK.release()
 
     threading.Thread(target=ai_background_task, daemon=True).start()
 
@@ -473,10 +485,15 @@ def RescoreWeek():
     RunRiskAssessment(pid, current_tx, week)
 
 
+_plan_request = 0  # increases each time a customer/week is loaded, so old plans are dropped
+
+
 def RunRiskAssessment(person_id, tx_df=None, week=None):
     """Scores the customer (fast), shows it, then asks Granite for the plan (slow) in the background."""
-    global current_tx
+    global current_tx, _plan_request
     current_tx = tx_df
+    _plan_request += 1
+    my_request = _plan_request
     notebook.select(tab_risk)
     RiskHeadline.config(text=f"Scoring customer {person_id} with the risk model...", bootstyle="secondary")
     RiskBox.delete("1.0", tk.END)
@@ -495,11 +512,37 @@ def RunRiskAssessment(person_id, tx_df=None, week=None):
         current_case = case
         window.after(0, lambda: ShowRisk(case, weekly_risk))
 
-        message, source = run_agent(case)
-        label = "IBM Granite on LinuxONE" if source == "granite" else \
-            "safe template (Granite offline or reply failed the safety check)" if source == "template" else "rule"
-        window.after(0, lambda: RiskBox.insert(
-            tk.END, f"\n--- Message to customer (written by {label}) ---\n\n{message}\n"))
+        def add(text):
+            def do():
+                if my_request == _plan_request:  # a newer customer was loaded: drop this one
+                    RiskBox.insert(tk.END, text)
+                    RiskBox.see(tk.END)
+            window.after(0, do)
+
+        if case["risk_level"].lower() in ("steady", "low"):
+            message, source = run_agent(case)  # no Granite needed for steady customers
+            add(f"\n--- Message to customer ---\n\n{message}\n")
+            return
+
+        if not GRANITE_LOCK.acquire(blocking=False):
+            add("\nWaiting for Granite to finish the chat answer...\n")
+            GRANITE_LOCK.acquire()
+        try:
+            if my_request != _plan_request:
+                return  # user already moved on to another customer or week
+            add("\n--- Message to customer (IBM Granite on LinuxONE, writing live) ---\n\n")
+            streamed = []
+            message, source = run_agent(case, on_token=lambda piece: (streamed.append(piece), add(piece)))
+        finally:
+            GRANITE_LOCK.release()
+
+        if source == "granite":
+            add("\n\n[Checked: passed the safety rules]\n")
+        elif streamed:
+            add("\n\n[Safety check: Granite's reply broke a rule, so the safe version is used instead]\n\n"
+                f"{message}\n")
+        else:
+            add(f"(Granite unavailable, safe template used)\n\n{message}\n")
 
     threading.Thread(target=background, daemon=True).start()
 
@@ -529,7 +572,7 @@ def ShowRisk(case, weekly_risk):
         for w in case["what_ifs"]:
             RiskBox.insert(tk.END, f"  - If they {w['change']} (saves about £{w['saved']:,.0f} over 8 weeks): "
                                    f"{w['from']} {w['from_p']:.0%} -> {w['to']} {w['to_p']:.0%}\n")
-    RiskBox.insert(tk.END, "\nAsking Granite for the action plan (can take a minute on 3 CPUs)...\n")
+    RiskBox.insert(tk.END, "\nAsking Granite for the action plan (words appear as it writes)...\n")
     DrawRiskChart(case, weekly_risk)
 
 

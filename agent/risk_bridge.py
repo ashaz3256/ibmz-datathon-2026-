@@ -13,6 +13,7 @@ Usage:
     python3 agent/risk_bridge.py 42 --agent # ...and ask Granite to write the message
 """
 
+import inspect
 import os
 import re
 import sys
@@ -49,7 +50,8 @@ def _load_predictor():
     """Imports model/Predictor.py, fixing its Windows-style model path so it runs on Linux."""
     src = (MODEL_DIR / "Predictor.py").read_text()
     model_path = str(MODEL_DIR / "crisis_prediction_model.json")
-    src = re.sub(r"""['"]model[\\/]+crisis_prediction_model\.json['"]""", repr(model_path), src)
+    # Works whether Predictor.py says 'model\\crisis_prediction_model.json', 'model/...' or just the file name
+    src = re.sub(r"""['"](?:model[\\/]+)?crisis_prediction_model\.json['"]""", repr(model_path), src)
     mod = types.ModuleType("Predictor")
     mod.__file__ = str(MODEL_DIR / "Predictor.py")
     exec(compile(src, mod.__file__, "exec"), mod.__dict__)
@@ -109,8 +111,16 @@ def person_frames(person_id, data_dir=DATA_DIR, transactions=None):
 
 def _score(w, p, t):
     pred = predictor()
-    cap = _CaptureFeatures(pred.model)
-    res = pred.get_crisis_predictions(w, p, t, cap)
+    real_model = pred.model
+    cap = _CaptureFeatures(real_model)
+    if len(inspect.signature(pred.get_crisis_predictions).parameters) >= 4:
+        res = pred.get_crisis_predictions(w, p, t, cap)    # older version: model passed in
+    else:
+        pred.model = cap                                     # newer version: uses its own global model
+        try:
+            res = pred.get_crisis_predictions(w, p, t)
+        finally:
+            pred.model = real_model
     return res.reset_index(drop=True), cap.X.reset_index(drop=True)
 
 
