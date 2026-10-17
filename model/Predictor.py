@@ -7,7 +7,8 @@ import xgboost as xgb
 model = xgb.XGBClassifier()
 model.load_model('model\\crisis_prediction_model.json')
 
-def get_crisis_predictions(weekly, people, transactions, xgb_model):
+def get_crisis_predictions(weekly, people, transactions):
+    xgb_model = model
     # Safety check for memory blowout
     if len(people) > 1:
         raise ValueError("people_df has more than 1 row! Use only single-person data.")
@@ -37,10 +38,10 @@ def get_crisis_predictions(weekly, people, transactions, xgb_model):
     df = pd.merge(df, tx_agg, on='week', how='left')
     df = pd.merge(df, tx_cat, on='week', how='left')
 
-    # 4. Align features with the model's expectations
+    # 4. Align features with the model's expectations (Fixed to initialize all missing expected features)
     expected_features = list(xgb_model.feature_names_in_)
     for col in expected_features:
-        if col.startswith('spend_') and col not in df.columns:
+        if col not in df.columns:
             df[col] = 0.0
 
     tx_cols = ['total_spent', 'tx_count'] + [c for c in df.columns if str(c).startswith('spend_')]
@@ -70,4 +71,4 @@ if __name__ == "__main__":
     weekly = pd.read_csv('model\\weekly.csv')
     transactions = pd.read_csv('model\\transactions.csv')
     people = pd.read_csv('model\\people.csv')
-    print(get_crisis_predictions(weekly, people, transactions, model))
+    print(get_crisis_predictions(weekly, people, transactions))
