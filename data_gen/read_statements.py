@@ -57,60 +57,38 @@ def num(s):
     return float(s.replace(",", ""))
 
 
+ROW = re.compile(rf"^{DATE}\s+(.+?)\s+((?:{NUM}\s*)+)$")
+BF = re.compile(rf"BALANCE BROUGHT FORWARD\s+({NUM})")
+
+
 def parse_pdf(path):
-    """pypdf gives each text item on its own line, so read the page as a stream:
-    a date starts a row, the next line is the description, the numbers after it are
-    the amount column(s) and finally the running balance."""
+    """Each transaction is one line: date, description, amount column(s), balance.
+    The amount is worked out from the running balance, so blank columns don't matter."""
     reader = PdfReader(path)
-    lines = []
+    rows, prev, customer = [], None, None
     for page in reader.pages:
-        lines += [l.strip() for l in (page.extract_text() or "").splitlines() if l.strip()]
-
-    customer = next((int(m.group(1)) for l in lines if (m := CUSTOMER.search(l))), None)
-    rows, prev, cur, expect_bf = [], None, None, False
-
-    def close(row):
-        nonlocal prev
-        if row and row["nums"]:
-            balance = row["nums"][-1]
+        for text in (page.extract_text() or "").splitlines():
+            text = text.strip()
+            if customer is None and (m := CUSTOMER.search(text)):
+                customer = int(m.group(1))
+            if (m := BF.search(text)):
+                if prev is None:
+                    prev = num(m.group(1))
+                continue
+            if not (m := ROW.match(text)):
+                continue
+            d, desc, nums = m.groups()
+            balance = num(nums.split()[-1])
             amount = round(balance - prev, 2) if prev is not None else None
             prev = balance
             rows.append({
                 "person_id": customer,
-                "date": datetime.strptime(row["date"], "%d %b %Y").date().isoformat(),
-                "description": row["desc"],
+                "date": datetime.strptime(d, "%d %b %Y").date().isoformat(),
+                "description": desc.strip(),
                 "amount": amount,
-                "category": categorise(row["desc"].upper()),
+                "category": categorise(desc.upper()),
                 "balance_after": balance,
             })
-
-    for line in lines:
-        if line.startswith("BALANCE BROUGHT FORWARD"):
-            close(cur); cur = None
-            tail = line.replace("BALANCE BROUGHT FORWARD", "").strip()
-            if re.fullmatch(NUM, tail):
-                prev = prev if prev is not None else num(tail)
-            else:
-                expect_bf = True
-            continue
-        if expect_bf and re.fullmatch(NUM, line):
-            if prev is None:
-                prev = num(line)
-            expect_bf = False
-            continue
-        if re.fullmatch(DATE, line):
-            close(cur)
-            cur = {"date": line, "desc": None, "nums": []}
-            continue
-        if cur is None:
-            continue
-        if cur["desc"] is None:
-            cur["desc"] = line
-        elif re.fullmatch(NUM, line):
-            cur["nums"].append(num(line))
-        else:                       # header/footer text on a new page ends the row
-            close(cur); cur = None
-    close(cur)
     return pd.DataFrame(rows)
 
 
