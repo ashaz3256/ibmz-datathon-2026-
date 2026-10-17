@@ -66,7 +66,8 @@ def get_crisis_predictions(weekly, people, transactions, xgb_model):
 
     return results
 
-weekly = pd.read_csv('model\\weekly.csv')
-transactions = pd.read_csv('model\\transactions.csv')
-people = pd.read_csv('model\\people.csv')
-print(get_crisis_predictions(weekly, people, transactions, model))
+if __name__ == "__main__":
+    weekly = pd.read_csv('model\\weekly.csv')
+    transactions = pd.read_csv('model\\transactions.csv')
+    people = pd.read_csv('model\\people.csv')
+    print(get_crisis_predictions(weekly, people, transactions, model))
