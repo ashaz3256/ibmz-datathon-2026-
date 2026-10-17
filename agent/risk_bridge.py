@@ -274,9 +274,9 @@ def score_person(person_id, week=None, data_dir=DATA_DIR, transactions=None):
         "first_alert_week": first_alert,
         "first_missed_rent_week": first_missed,
     }
-    weekly_risk = res[["week", "crisis_probability"]].copy()
-    if "missed_rent" in res:
-        weekly_risk["missed_rent"] = res["missed_rent"]
+    # every week's result from Sourov's Predictor (balance, probability, his high-risk flag)
+    keep = [c for c in ("week", "balance", "crisis_probability", "high_risk_flag", "missed_rent") if c in res]
+    weekly_risk = res[keep].copy()
     return case, weekly_risk
 
 

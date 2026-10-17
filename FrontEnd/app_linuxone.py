@@ -8,6 +8,7 @@ import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
 
 import os
+import platform
 import sys
 from pathlib import Path
 
@@ -508,6 +509,7 @@ def RunRiskAssessment(person_id, tx_df=None, week=None):
                                                              transactions=tx_df)
         except Exception as e:
             window.after(0, lambda e=e: RiskHeadline.config(text=f"Risk model error: {e}", bootstyle="danger"))
+            window.after(0, lambda e=e: ShowMLStats(error=f"{type(e).__name__}: {e}"))
             return
         current_case = case
         window.after(0, lambda: ShowRisk(case, weekly_risk))
@@ -547,6 +549,43 @@ def RunRiskAssessment(person_id, tx_df=None, week=None):
     threading.Thread(target=background, daemon=True).start()
 
 
+ML_HEADER = "=== LOCAL ML RISK MODEL (Sourov's XGBoost) ==="
+
+
+def ShowMLStats(case=None, weekly_risk=None, error=None):
+    """Ismail's ML Status / Local ML Crisis Probability Score section, in the Advanced NumPy Metrics tab.
+    Uses the same real-data scores as the Risk tab. Replaces the previous section instead of stacking."""
+    start = StatsBox.search(ML_HEADER, "1.0")
+    if start:
+        StatsBox.delete(start, tk.END)
+    out = [f"\n{ML_HEADER}\n\n"]
+    if error or case is None:
+        out.append(f"• ML Status:                         Error - {error}\n")
+    else:
+        sel = weekly_risk[weekly_risk.week == case["week"]]
+        top = weekly_risk.loc[weekly_risk.crisis_probability.idxmax()]
+        out += [
+            f"• ML Status:                         Loaded - XGBoost model running locally on "
+            f"{platform.machine()} ({'IBM LinuxONE' if platform.machine() == 's390x' else 'not LinuxONE'})\n",
+            f"• Local ML Crisis Probability Score: {case['risk_score']:.4f} / 1.0  (week {case['week']}, "
+            f"{case['risk_level']})\n",
+            f"• Highest weekly score:              {top.crisis_probability:.4f} / 1.0  (week {int(top.week)})\n",
+        ]
+        if case["first_alert_week"] is not None:
+            out.append(f"• Early warning first fired:         week {case['first_alert_week']}\n")
+        if case["first_missed_rent_week"] is not None:
+            out.append(f"• Rent first missed:                 week {case['first_missed_rent_week']}\n")
+        out.append("\n--- Weekly Model Predictions (12 weeks up to the selected week) ---\n")
+        window_weeks = weekly_risk[weekly_risk.week <= case["week"]].tail(12)
+        for _, wp in window_weeks.iterrows():
+            bal = f"£{wp['balance']:,.2f}" if "balance" in wp else "n/a"
+            flag = int(wp["high_risk_flag"]) if "high_risk_flag" in wp else int(wp.crisis_probability > 0.7)
+            here = "   <- selected week" if int(wp.week) == case["week"] else ""
+            out.append(f"Week {int(wp.week):>2}: Balance {bal:>11} | Crisis Prob: {wp.crisis_probability:6.2%} | "
+                       f"{risk_bridge.level_for(wp.crisis_probability):<14} | High Risk: {flag}{here}\n")
+    StatsBox.insert(tk.END, "".join(out))
+
+
 def ShowRisk(case, weekly_risk):
     lvl = case["risk_level"]
     RiskHeadline.config(
@@ -574,6 +613,7 @@ def ShowRisk(case, weekly_risk):
                                    f"{w['from']} {w['from_p']:.0%} -> {w['to']} {w['to_p']:.0%}\n")
     RiskBox.insert(tk.END, "\nAsking Granite for the action plan (words appear as it writes)...\n")
     DrawRiskChart(case, weekly_risk)
+    ShowMLStats(case, weekly_risk)
 
 
 def DrawRiskChart(case, weekly_risk):
