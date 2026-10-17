@@ -1,4 +1,6 @@
 numpy
 pandas
+scikit-learn
 reportlab
 pypdf
+# optional, faster models: snapml (IBM Snap ML) or xgboost
