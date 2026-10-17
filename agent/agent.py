@@ -21,7 +21,7 @@ import sys
 import requests
 
 LLM_URL = os.environ.get("LLM_URL", "http://localhost:8080/v1/chat/completions")
-LLM_TIMEOUT = int(os.environ.get("LLM_TIMEOUT", "60"))
+LLM_TIMEOUT = int(os.environ.get("LLM_TIMEOUT", "300"))
 
 # Debts in the order people should deal with them (priority debts first).
 PRIORITY_ORDER = [
@@ -45,14 +45,25 @@ A risk model has flagged that a customer may be heading into financial difficult
 Write to the customer directly, in a calm, kind, non-judgemental tone.
 
 Rules:
-- Use ONLY the facts given. Never invent numbers, debts or reasons.
+- Use ONLY the facts given. Never invent numbers, debts or reasons. Copy numbers exactly.
+- Describe how serious things are using the risk level wording given. Never say "slightly".
 - Explain in 2-3 sentences why their risk is rising.
-- Then give a short numbered plan (max 4 steps). Priority debts (rent, council tax,
-  energy, mortgage) always come before credit cards, loans and overdrafts.
+- Then give a short numbered plan (max 4 steps). Deal with the priority debts first,
+  then the others, in the order given.
+- NEVER suggest borrowing more: no overdraft or credit limit increases, new loans,
+  credit cards, payday loans or buy now pay later.
+- NEVER suggest setting up direct debits or new payments.
 - If a what-if scenario is given, mention it as encouragement.
-- Signpost 1-2 free services from the list given. Do not give regulated debt advice;
+- Signpost the free services given. Do not give regulated debt advice;
   say they can get free, confidential help.
-- Under 180 words. Plain English, no jargon, no markdown headings."""
+- Start with "Hi <first name>,". Under 160 words. Plain English, no markdown headings."""
+
+# Phrases a reply must never contain. If Granite writes one, we use the template instead.
+BANNED_PHRASES = [
+    "limit increase", "increase your overdraft", "increase your limit", "extend your overdraft",
+    "new loan", "take out a loan", "apply for a loan", "payday loan to", "new credit card",
+    "balance transfer", "direct debit for", "set up a direct debit", "slightly", "(priority)",
+]
 
 
 # ---------- helpers ----------
@@ -89,10 +100,14 @@ def build_facts(case):
         f"Risk level: {case['risk_level']} (score {case['risk_score']:.2f} out of 1)",
         "Main reasons from the model: " + "; ".join(case.get("top_reasons", [])),
     ]
-    if debts:
-        lines.append("Debts, already in the order to deal with them: " + "; ".join(
-            f"{d['type']} £{d.get('amount', 0):,.0f}" + (" (PRIORITY)" if d['type'].lower() in PRIORITY_DEBTS else "")
-            for d in debts))
+    priority = [d for d in debts if d["type"].lower() in PRIORITY_DEBTS]
+    other = [d for d in debts if d["type"].lower() not in PRIORITY_DEBTS]
+    if priority:
+        lines.append("Priority debts (deal with these first): " + "; ".join(
+            f"{d['type']} £{d.get('amount', 0):,.0f}" for d in priority))
+    if other:
+        lines.append("Other debts (after the priority ones): " + "; ".join(
+            f"{d['type']} £{d.get('amount', 0):,.0f}" for d in other))
     for w in case.get("what_ifs", []):
         lines.append(f"What-if: if they {w['change']}, risk goes from {w['from']} to {w['to']}")
     support = pick_support(case)
@@ -109,12 +124,16 @@ def ask_granite(case):
             {"role": "user", "content": build_facts(case)},
         ],
         "temperature": 0.3,
-        "max_tokens": 350,
+        "max_tokens": 300,
     })
     r.raise_for_status()
     text = r.json()["choices"][0]["message"]["content"].strip()
     if len(text) < 40:
         raise ValueError("model reply too short")
+    lowered = text.lower()
+    for phrase in BANNED_PHRASES:
+        if phrase in lowered:
+            raise ValueError(f"unsafe reply (contained '{phrase}')")
     return text
 
 
@@ -150,7 +169,7 @@ def run_agent(case):
     try:
         return ask_granite(case), "granite"
     except Exception as e:
-        print(f"[agent] Granite unavailable ({type(e).__name__}), using template", file=sys.stderr)
+        print(f"[agent] Granite not used ({type(e).__name__}: {e}), using template", file=sys.stderr)
         return template_message(case), "template"
 
 
