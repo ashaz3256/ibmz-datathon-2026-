@@ -1,128 +1,98 @@
-
-import re
+import csv
+import numpy as np
 import tkinter as tk
 from tkinter import scrolledtext, filedialog
-from pypdf import PdfReader
- 
+
 window = tk.Tk()
-window.title("Bank Statement Analyser")
-window.geometry("1000x800")
- 
-ChatBox = scrolledtext.ScrolledText(window, width=100, height=30)
-ChatBox.grid(row=1, column=0, sticky="nsew", padx=10)
- 
-# Matches lines like:  15/10/26 Netflix £103- £2593
-#                      15/10/26 Wages £104+ £2697
-LINE_PATTERN = re.compile(
-    r"^(?P<date>\d{1,2}/\d{1,2}/\d{2,4})\s+"
-    r"(?P<item>.+?)\s+"
-    r"£(?P<cost>[\d,]+(?:\.\d+)?)\s*(?P<sign>[+-])?\s+"
-    r"£(?P<balance>[\d,]+(?:\.\d+)?)\s*$"
-)
- 
- 
+window.title("Financial Summary Analyser (NumPy & CSV)")
+window.geometry("1100x850")
+
+ChatBox = scrolledtext.ScrolledText(window, width=110, height=35)
+ChatBox.grid(row=1, column=0, sticky="nsew", padx=10, pady=10)
+
 def ObtainLocalFile():
-    """Ask the user for a PDF and return its path (or None if cancelled)."""
+    """Ask the user for the financial mock data CSV file."""
     path = filedialog.askopenfilename(
-        title="Select a PDF",
-        filetypes=[("PDF files", "*.pdf")]
+        title="Select Financial Mock Data CSV",
+        filetypes=[("CSV files", "*.csv"), ("All files", "*.*")]
     )
     return path or None
- 
- 
-def ExtractText(path):
-    """Return the text from every page of the PDF."""
-    reader = PdfReader(path)
-    return "\n".join((page.extract_text() or "") for page in reader.pages)
- 
- 
-def ParseTransactions(text):
-    """Turn statement text into a list of dictionaries, one per transaction."""
-    transactions = []
-    for line in text.splitlines():
-        match = LINE_PATTERN.match(line.strip())
-        if not match:
-            continue  # header row, blank line, etc.
- 
-        cost = float(match["cost"].replace(",", ""))
-        # "-" means money out, "+" means money in. A bare £0 has no sign.
-        if match["sign"] == "-":
-            cost = -cost
- 
-        transactions.append({
-            "date": match["date"],
-            "item": match["item"],
-            "cost": cost,
-            "balance": float(match["balance"].replace(",", "")),
-        })
-    return transactions
- 
- 
-def BuildColumns(transactions):
-    """Same data as a dictionary of columns: {'date': [...], 'item': [...], ...}"""
-    return {
-        key: [t[key] for t in transactions]
-        for key in ("date", "item", "cost", "balance")
-    }
- 
- 
-def BuildTotalsByItem(transactions):
-    """Dictionary of total spent/received per item name."""
-    totals = {}
-    for t in transactions:
-        totals[t["item"]] = totals.get(t["item"], 0) + t["cost"]
-    return totals
- 
- 
+
 def ObtainFileData():
     ChatBox.delete("1.0", tk.END)
     path = ObtainLocalFile()
-    if not path:  # user clicked Cancel
+    if not path:
         return
- 
+
     try:
-        text = ExtractText(path)
-        if not text.strip():
-            ChatBox.insert(tk.END, "No extractable text in this PDF.")
+        # Read CSV file using standard csv module
+        with open(path, mode='r', encoding='utf-8') as f:
+            reader = csv.reader(f)
+            header = next(reader, None)
+            if not header:
+                ChatBox.insert(tk.END, "CSV file is empty or missing headers.")
+                return
+
+            rows = [row for row in reader if row]
+
+        if not rows:
+            ChatBox.insert(tk.END, "No data rows found in the CSV file.")
             return
- 
-        transactions = ParseTransactions(text)
-        if not transactions:
-            ChatBox.insert(
-                tk.END,
-                "No transactions matched. Raw text extracted:\n\n" + text
-            )
-            return
- 
-        columns = BuildColumns(transactions)
-        totals = BuildTotalsByItem(transactions)
- 
-        ChatBox.insert(tk.END, "Transactions (list of dicts):\n")
-        for t in transactions:
-            ChatBox.insert(tk.END, f"{t}\n")
- 
-        ChatBox.insert(tk.END, "\nColumns (dict of lists):\n")
-        for key, values in columns.items():
-            ChatBox.insert(tk.END, f"{key}: {values}\n")
- 
-        ChatBox.insert(tk.END, "\nTotals by item (dict):\n")
-        for item, total in totals.items():
-            ChatBox.insert(tk.END, f"{item}: {total:+.2f}\n")
-            
- 
+
+        # Convert rows into a 2D NumPy array of floats
+        data = np.array([[float(val) for val in row] for row in rows], dtype=float)
+
+        # Map header names to column indices
+        col_map = {name.strip(): idx for idx, name in enumerate(header)}
+
+        # Extract key NumPy arrays
+        balances = data[:, col_map['balance']]
+        incomes = data[:, col_map['monthly_income']]
+        total_spent = data[:, col_map['total_spent']]
+        tx_counts = data[:, col_map['tx_count']]
+
+        # Compute NumPy statistical summaries
+        avg_balance = np.mean(balances)
+        max_balance = np.max(balances)
+        min_balance = np.min(balances)
+        
+        total_yearly_spent = np.sum(total_spent)
+        avg_monthly_spent = np.mean(total_spent)
+        total_yearly_income = np.sum(incomes)
+        avg_tx_count = np.mean(tx_counts)
+
+        # Display Summary
+        ChatBox.insert(tk.END, f"=== 1-Year Financial Mock Data Analysis ({len(data)} Months) ===\n\n")
+        
+        ChatBox.insert(tk.END, "--- Macro Financial Overview ---\n")
+        ChatBox.insert(tk.END, f"Total Yearly Income: £{total_yearly_income:,.2f}\n")
+        ChatBox.insert(tk.END, f"Total Yearly Spent: £{total_yearly_spent:,.2f}\n")
+        ChatBox.insert(tk.END, f"Average Monthly Balance: £{avg_balance:,.2f} (Min: £{min_balance:,.2f}, Max: £{max_balance:,.2f})\n")
+        ChatBox.insert(tk.END, f"Average Monthly Spending: £{avg_monthly_spent:,.2f}\n")
+        ChatBox.insert(tk.END, f"Average Monthly Transactions: {avg_tx_count:.1f}\n\n")
+
+        # Category Breakdown (Columns starting with 'spend_')
+        ChatBox.insert(tk.END, "--- Annual Spending by Category (NumPy Aggregation) ---\n")
+        spend_categories = {name: col_map[name] for name in header if name.startswith('spend_')}
+        
+        for cat_name, col_idx in spend_categories.items():
+            category_data = data[:, col_idx]
+            annual_total = np.sum(category_data)
+            monthly_avg = np.mean(category_data)
+            display_name = cat_name.replace('spend_', '').replace('_', ' ').title()
+            ChatBox.insert(tk.END, f"{display_name:27} | Annual: £{annual_total:8,.2f} | Monthly Avg: £{monthly_avg:7,.2f}\n")
+
     except Exception as e:
         ChatBox.insert(tk.END, f"Error: {type(e).__name__}: {e}\nPath tried: {path}")
- 
- 
-# Let the chat box stretch when the window is resized
+
+# Configure window grid layout
 window.columnconfigure(0, weight=1)
 window.rowconfigure(1, weight=1)
- 
-AnalyseButton = tk.Button(window, text="Get Bank statement", command=ObtainFileData)
+
+AnalyseButton = tk.Button(window, text="Load Financial Mock Data CSV", command=ObtainFileData)
 AnalyseButton.grid(row=0, column=0, sticky="w", padx=10, pady=10)
- 
+
 UserInput = tk.Entry(window)
 UserInput.grid(row=2, column=0, sticky="ew", padx=10, pady=10)
 
- 
 window.mainloop()
