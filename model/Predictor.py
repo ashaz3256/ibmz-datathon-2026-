@@ -7,7 +7,8 @@ import xgboost as xgb
 model = xgb.XGBClassifier()
 model.load_model('model\\crisis_prediction_model.json')
 
-def get_crisis_predictions(weekly, people, transactions, xgb_model):
+def get_crisis_predictions(weekly, people, transactions):
+    xgb_model = model
     # Safety check for memory blowout
     if len(people) > 1:
         raise ValueError("people_df has more than 1 row! Use only single-person data.")
@@ -70,4 +71,4 @@ if __name__ == "__main__":
     weekly = pd.read_csv('model\\weekly.csv')
     transactions = pd.read_csv('model\\transactions.csv')
     people = pd.read_csv('model\\people.csv')
-    print(get_crisis_predictions(weekly, people, transactions, model))
+    print(get_crisis_predictions(weekly, people, transactions))
