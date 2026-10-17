@@ -5,7 +5,7 @@ import xgboost as xgb
 
 # 1. Load the model once when the module is imported
 model = xgb.XGBClassifier()
-model.load_model('crisis_prediction_model.json')
+model.load_model('model\\crisis_prediction_model.json')
 
 def get_crisis_predictions(weekly, people, transactions):
     xgb_model = model
@@ -38,10 +38,10 @@ def get_crisis_predictions(weekly, people, transactions):
     df = pd.merge(df, tx_agg, on='week', how='left')
     df = pd.merge(df, tx_cat, on='week', how='left')
 
-    # 4. Align features with the model's expectations
+    # 4. Align features with the model's expectations (Fixed to initialize all missing expected features)
     expected_features = list(xgb_model.feature_names_in_)
     for col in expected_features:
-        if col.startswith('spend_') and col not in df.columns:
+        if col not in df.columns:
             df[col] = 0.0
 
     tx_cols = ['total_spent', 'tx_count'] + [c for c in df.columns if str(c).startswith('spend_')]
@@ -68,7 +68,7 @@ def get_crisis_predictions(weekly, people, transactions):
     return results
 
 if __name__ == "__main__":
-    weekly = pd.read_csv('weekly.csv')
-    transactions = pd.read_csv('transactions.csv')
-    people = pd.read_csv('people.csv')
+    weekly = pd.read_csv('model\\weekly.csv')
+    transactions = pd.read_csv('model\\transactions.csv')
+    people = pd.read_csv('model\\people.csv')
     print(get_crisis_predictions(weekly, people, transactions))
