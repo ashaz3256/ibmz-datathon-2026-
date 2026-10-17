@@ -150,7 +150,9 @@ def template_message(case):
     priority = [d for d in debts if d["type"].lower() in PRIORITY_DEBTS]
     other = [d for d in debts if d["type"].lower() not in PRIORITY_DEBTS]
     if priority:
-        steps.append("Put " + " and ".join(d["type"] for d in priority) + " first, as missing these has the most serious consequences.")
+        names = [d["type"] for d in priority]
+        listed = names[0] if len(names) == 1 else ", ".join(names[:-1]) + " and " + names[-1]
+        steps.append(f"Put {listed} first, as missing these has the most serious consequences.")
     if other:
         steps.append("Pay at least the minimum on your " + ", ".join(d["type"] for d in other) + " and ask lenders about breathing space.")
     for w in case.get("what_ifs", [])[:1]:
