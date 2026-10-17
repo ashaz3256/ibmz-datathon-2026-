@@ -1,161 +1,246 @@
 import csv
 import numpy as np
 import tkinter as tk
-from tkinter import filedialog, scrolledtext
-import ttkbootstrap as ttk
+from tkinter import filedialog
+import ttkbootstrap as ttk_bs
 import matplotlib.pyplot as plt
-from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
 
-# Initialize ttkbootstrap themed window
-window = ttk.Window(themename="cosmo")
-window.title("Financial Summary, Dictionaries & Charts")
-window.geometry("1200x900")  # Fixed: using standard 'x' instead of multiplication sign
+# Initialize ttkbootstrap themed window with dark executive look
+window = ttk_bs.Window(themename="cyborg")
+window.title("IBM Enterprise Financial Intelligence Suite")
+window.geometry("1400x950")
 
-# Use standard scrolledtext inside the themed window
-ChatBox = scrolledtext.ScrolledText(window, width=110, height=25)
-ChatBox.grid(row=1, column=0, sticky="nsew", padx=15, pady=15)
+# IBM Design Language Colour Palette
+IBM_BLUE = "#0f62fe"
+IBM_DARK = "#161616"
+IBM_PANEL = "#262626"
+IBM_TEXT = "#f4f4f4"
+IBM_SUCCESS = "#24a148"
+
+# Main container frame
+main_frame = ttk_bs.Frame(window, padding=15)
+main_frame.grid(row=0, column=0, sticky="nsew")
+
+window.columnconfigure(0, weight=1)
+window.rowconfigure(0, weight=1)
+main_frame.columnconfigure(0, weight=1)
+main_frame.rowconfigure(2, weight=1)
+
+# Header Title (Using ttk_bs.Label)
+title_label = ttk_bs.Label(
+    main_frame, 
+    text="IBM ENTERPRISE FINANCIAL INTELLIGENCE PLATFORM", 
+    font=("Segoe UI", 16, "bold"),
+    bootstyle="inverse"
+)
+title_label.grid(row=0, column=0, sticky="w", pady=(0, 10))
+
+# Top Action Control Frame
+control_frame = ttk_bs.Frame(main_frame)
+control_frame.grid(row=1, column=0, sticky="ew", pady=(0, 10))
 
 def ObtainLocalFile():
-    """Ask the user for the financial mock data CSV file."""
+    """Ask the user for the transaction CSV file."""
     path = filedialog.askopenfilename(
-        title="Select Financial Mock Data CSV",
+        title="Select Transactions CSV",
         filetypes=[("CSV files", "*.csv"), ("All files", "*.*")]
     )
     return path or None
 
-def GenerateCharts(data, header, col_map):
-    """Generate Matplotlib charts for monthly balance and category spending."""
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5))
+def EmbedInteractiveCharts(transactions, parent_container):
+    """Embed an advanced 3-panel analytics dashboard for transaction data."""
+    for widget in parent_container.winfo_children():
+        widget.destroy()
+
+    plt.style.use('dark_background')
+    fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(15, 5.5))
+    fig.patch.set_facecolor(IBM_PANEL)
     
-    # 1. Monthly Balance Trend
-    months = [f"M{i+1}" for i in range(len(data))]
-    balances = data[:, col_map['balance']]
-    ax1.plot(months, balances, marker='o', color='#0275d8', linewidth=2)
-    ax1.set_title("Monthly Balance Trend")
-    ax1.set_xlabel("Month")
-    ax1.set_ylabel("Balance (£)")
-    ax1.grid(True, linestyle='--', alpha=0.6)
+    balances = [t["balance"] for t in transactions]
     
-    # 2. Spending Categories Breakdown
-    spend_categories = [name for name in header if name.startswith('spend_') and name != 'spend_salary']
-    category_totals = []
-    category_labels = []
+    # 1. Balance Trajectory Line Chart
+    ax1.set_facecolor(IBM_DARK)
+    ax1.plot(range(len(balances)), balances, color=IBM_BLUE, linewidth=2)
+    ax1.set_title("Balance Trajectory", color=IBM_TEXT, fontsize=11, fontweight='bold')
+    ax1.set_xlabel("Transaction Sequence", color=IBM_TEXT)
+    ax1.set_ylabel("Balance (£)", color=IBM_TEXT)
+    ax1.grid(True, linestyle='--', alpha=0.3, color='#525252')
+    ax1.tick_params(colors=IBM_TEXT)
     
-    for cat in spend_categories:
-        total = np.sum(data[:, col_map[cat]])
-        if total > 0:
-            category_totals.append(total)
-            category_labels.append(cat.replace('spend_', '').replace('_', ' ').title())
+    # 2. Spending Breakdown Donut/Pie Chart by Category
+    categories = {}
+    for t in transactions:
+        if t["cost"] < 0:  # Outflows only
+            cat = t["category"].title()
+            categories[cat] = categories.get(cat, 0) + abs(t["cost"])
             
-    ax2.pie(category_totals, labels=category_labels, autopct='%1.1f%%', startangle=140, colors=plt.cm.Paired.colors)
-    ax2.set_title("Spending Breakdown by Category")
+    cat_labels = list(categories.keys())
+    cat_values = list(categories.values())
     
+    ax2.set_facecolor(IBM_DARK)
+    if cat_values:
+        ax2.pie(
+            cat_values, 
+            labels=cat_labels, 
+            autopct='%1.1f%%', 
+            startangle=140, 
+            colors=['#0f62fe', '#33b1ff', '#009d9a', '#8a3ffc', '#fa4d56', '#42be65', '#f1c21b', '#ff7eb6']
+        )
+    ax2.set_title("Expense Distribution by Category", color=IBM_TEXT, fontsize=11, fontweight='bold')
+
+    # 3. Cumulative Cash Flow Bar Chart
+    ax3.set_facecolor(IBM_DARK)
+    costs = np.array([t["cost"] for t in transactions])
+    inflows = np.sum(costs[costs > 0])
+    outflows = abs(np.sum(costs[costs < 0]))
+    
+    ax3.bar(["Total Inflows", "Total Outflows"], [inflows, outflows], color=[IBM_SUCCESS, '#fa4d56'], width=0.5)
+    ax3.set_title("Inflows vs Outflows", color=IBM_TEXT, fontsize=11, fontweight='bold')
+    ax3.set_ylabel("Amount (£)", color=IBM_TEXT)
+    ax3.grid(True, linestyle='--', alpha=0.3, color='#525252')
+    ax3.tick_params(colors=IBM_TEXT)
+
     plt.tight_layout()
-    
-    # Open a new Tkinter window to display the matplotlib charts
-    chart_window = ttk.Toplevel(window)
-    chart_window.title("Financial Visualizations")
-    chart_window.geometry("1000x600")  # Fixed: using standard 'x'
-    
-    canvas = FigureCanvasTkAgg(fig, master=chart_window)
+
+    canvas = FigureCanvasTkAgg(fig, master=parent_container)
     canvas.draw()
-    canvas.get_tk_widget().pack(side=tk.TOP, fill=tk.BOTH, expand=1)
+    canvas.get_tk_widget().pack(side=tk.TOP, fill=tk.BOTH, expand=True)
+
+    toolbar = NavigationToolbar2Tk(canvas, parent_container)
+    toolbar.update()
+    toolbar.pack(side=tk.BOTTOM, fill=tk.X)
 
 def ObtainFileData():
-    ChatBox.delete("1.0", tk.END)
+    for row in transaction_table.get_children():
+        transaction_table.delete(row)
+    StatsBox.delete("1.0", tk.END)
+
     path = ObtainLocalFile()
     if not path:
         return
 
     try:
-        # Read CSV file using standard csv module
+        transactions = []
         with open(path, mode='r', encoding='utf-8') as f:
             reader = csv.reader(f)
             header = next(reader, None)
             if not header:
-                ChatBox.insert(tk.END, "CSV file is empty or missing headers.\n")
+                StatsBox.insert(tk.END, "CSV file is empty or missing headers.\n")
                 return
 
-            rows = [row for row in reader if row]
-
-        if not rows:
-            ChatBox.insert(tk.END, "No data rows found in the CSV file.\n")
-            return
-
-        # Convert rows into a 2D NumPy array of floats
-        data = np.array([[float(val) for val in row] for row in rows], dtype=float)
-        col_map = {name.strip(): idx for idx, name in enumerate(header)}
-
-        # Build a list of transaction dictionaries
-        transactions = []
-        spend_categories = [name for name in header if name.startswith('spend_')]
-
-        for i, row in enumerate(data):
-            month_label = f"Month {i+1}"
-            balance_val = row[col_map['balance']]
+            col_map = {name.strip(): idx for idx, name in enumerate(header)}
             
-            # Record income/salary entry
-            if 'spend_salary' in col_map and row[col_map['spend_salary']] > 0:
-                salary_val = row[col_map['spend_salary']]
+            for row in reader:
+                if not row or len(row) < len(header):
+                    continue
+                
+                date_val = row[col_map['date']].strip()
+                merchant_val = row[col_map['merchant']].strip()
+                category_val = row[col_map['category']].strip()
+                cost_val = float(row[col_map['amount']])
+                balance_val = float(row[col_map['balance_after']])
+
+                # Store each transaction as a dictionary
                 transactions.append({
-                    "date": month_label,
-                    "name": "Salary / Income",
-                    "cost": salary_val,
+                    "date": date_val,
+                    "name": f"{merchant_val} ({category_val})",
+                    "category": category_val,
+                    "cost": cost_val,
                     "balance": balance_val
                 })
 
-            # Record spending categories as individual transaction items
-            for cat in spend_categories:
-                cost_val = row[col_map[cat]]
-                if cost_val > 0:
-                    item_name = cat.replace('spend_', '').replace('_', ' ').title()
-                    transactions.append({
-                        "date": month_label,
-                        "name": item_name,
-                        "cost": -cost_val,  # Negative for money out
-                        "balance": balance_val
-                    })
+        if not transactions:
+            StatsBox.insert(tk.END, "No transaction rows found in the CSV file.\n")
+            return
 
-        # Convert to NumPy arrays for vectorized calculations
-        np_names = np.array([t["name"] for t in transactions], dtype=str)
+        # Insert rows into Treeview Table
+        for t in transactions:
+            transaction_table.insert("", tk.END, values=(t["date"], t["name"], f"£{t['cost']:+,.2f}", f"£{t['balance']:,.2f}"))
+
+        # NumPy Vector Calculations
         np_costs = np.array([t["cost"] for t in transactions], dtype=float)
+        np_balances = np.array([t["balance"] for t in transactions], dtype=float)
+        
+        total_inflow = np.sum(np_costs[np_costs > 0])
+        total_outflow = abs(np.sum(np_costs[np_costs < 0]))
+        net_delta = total_inflow - total_outflow
 
-        # Display results in ChatBox
-        ChatBox.insert(tk.END, f"Successfully mapped {len(transactions)} transaction records into dictionaries & NumPy arrays.\n\n")
+        # Populate Advanced Statistics Box
+        StatsBox.insert(tk.END, "=== ADVANCED NUMPY TRANSACTION ANALYTICS ===\n\n")
+        StatsBox.insert(tk.END, f"• Total Transactions Processed: {len(transactions)}\n")
+        StatsBox.insert(tk.END, f"• Total Cumulative Inflows:  £{total_inflow:,.2f}\n")
+        StatsBox.insert(tk.END, f"• Total Cumulative Outflows: £{total_outflow:,.2f}\n")
+        StatsBox.insert(tk.END, f"• Net Balance Delta:         £{net_delta:+,.2f}\n")
+        StatsBox.insert(tk.END, f"• Transaction Volatility (Std Dev): £{np.std(np_costs):,.2f}\n")
+        StatsBox.insert(tk.END, f"• Peak Account Balance:      £{np.max(np_balances):,.2f}\n")
+        StatsBox.insert(tk.END, f"• Minimum Account Balance:   £{np.min(np_balances):,.2f}\n\n")
 
-        ChatBox.insert(tk.END, "--- Sample of Stored Transaction Dictionaries (First 10) ---\n")
-        for t in transactions[:10]:
-            ChatBox.insert(tk.END, f"{t}\n")
-        ChatBox.insert(tk.END, "...\n\n")
-
-        ChatBox.insert(tk.END, "--- NumPy Vector Summary ---\n")
-        ChatBox.insert(tk.END, f"Total Inflows: £{np.sum(np_costs[np_costs > 0]):,.2f}\n")
-        ChatBox.insert(tk.END, f"Total Outflows: £{abs(np.sum(np_costs[np_costs < 0])):,.2f}\n")
-        ChatBox.insert(tk.END, f"Average Transaction Cost: £{np.mean(np_costs):,.2f}\n\n")
-
-        # Totals by item using NumPy masking
-        ChatBox.insert(tk.END, "--- Totals by Category Name ---\n")
-        unique_names = np.unique(np_names)
-        for name in unique_names:
-            mask = (np_names == name)
-            cat_total = np.sum(np_costs[mask])
-            ChatBox.insert(tk.END, f"{name:25} | Total: £{cat_total:+10,.2f}\n")
-
-        # Trigger chart generation popup window
-        GenerateCharts(data, header, col_map)
+        # Render charts
+        EmbedInteractiveCharts(transactions, chart_display_frame)
 
     except Exception as e:
-        ChatBox.insert(tk.END, f"Error: {type(e).__name__}: {e}\nPath tried: {path}\n")
+        StatsBox.insert(tk.END, f"Error: {type(e).__name__}: {e}\nPath tried: {path}\n")
 
-# Configure window grid layout
-window.columnconfigure(0, weight=1)
-window.rowconfigure(1, weight=1)
+# Action Button
+AnalyseButton = ttk_bs.Button(
+    control_frame, 
+    text="Load Transactions CSV & Initialize Dashboard", 
+    command=ObtainFileData, 
+    bootstyle="primary"
+)
+AnalyseButton.pack(side=tk.LEFT, padx=(0, 10))
 
-# Styled ttkbootstrap widgets
-AnalyseButton = ttk.Button(window, text="Load Data & Generate Charts", command=ObtainFileData, bootstyle="success-outline")
-AnalyseButton.grid(row=0, column=0, sticky="w", padx=15, pady=15)
+# Notebook layout separating views
+notebook = ttk_bs.Notebook(main_frame)
+notebook.grid(row=2, column=0, sticky="nsew")
 
-UserInput = ttk.Entry(window, bootstyle="info")
-UserInput.grid(row=2, column=0, sticky="ew", padx=15, pady=15)
+# Tab 1: Interactive Data Table (Treeview)
+tab_table = ttk_bs.Frame(notebook, padding=10)
+notebook.add(tab_table, text="  Structured Transactions Table  ")
+tab_table.columnconfigure(0, weight=1)
+tab_table.rowconfigure(0, weight=1)
+
+table_frame = ttk_bs.Frame(tab_table)
+table_frame.grid(row=0, column=0, sticky="nsew")
+table_frame.columnconfigure(0, weight=1)
+table_frame.rowconfigure(0, weight=1)
+
+columns = ("date", "name", "cost", "balance")
+transaction_table = ttk_bs.Treeview(table_frame, columns=columns, show="headings", bootstyle="info")
+transaction_table.heading("date", text="Date")
+transaction_table.heading("name", text="Merchant & Category")
+transaction_table.heading("cost", text="Amount")
+transaction_table.heading("balance", text="Balance After")
+
+transaction_table.column("date", width=150, anchor="center")
+transaction_table.column("name", width=350, anchor="w")
+transaction_table.column("cost", width=200, anchor="e")
+transaction_table.column("balance", width=200, anchor="e")
+
+scrollbar = ttk_bs.Scrollbar(table_frame, orient=tk.VERTICAL, command=transaction_table.yview)
+transaction_table.configure(yscrollcommand=scrollbar.set)
+transaction_table.grid(row=0, column=0, sticky="nsew")
+scrollbar.grid(row=0, column=1, sticky="ns")
+
+# Tab 2: Advanced NumPy Statistics Log
+tab_stats = ttk_bs.Frame(notebook, padding=10)
+notebook.add(tab_stats, text="  Advanced NumPy Metrics  ")
+StatsBox = tk.Text(tab_stats, width=120, height=25, bg="#1e1e1e", fg="#f4f4f4", insertbackground="white", font=("Consolas", 11))
+StatsBox.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+
+# Tab 3: Interactive Charts View
+tab_charts = ttk_bs.Frame(notebook, padding=10)
+notebook.add(tab_charts, text="  Interactive Visualizations Dashboard  ")
+tab_charts.columnconfigure(0, weight=1)
+tab_charts.rowconfigure(0, weight=1)
+
+chart_display_frame = ttk_bs.Frame(tab_charts)
+chart_display_frame.grid(row=0, column=0, sticky="nsew")
+
+# Bottom Command Line Entry
+UserInput = ttk_bs.Entry(main_frame)
+UserInput.grid(row=3, column=0, sticky="ew", pady=(10, 0))
+UserInput.insert(0, "IBM WatsonX Command Line Interface Ready...")
 
 window.mainloop()
