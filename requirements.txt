@@ -1,7 +1,11 @@
 numpy
 pandas
 scikit-learn
+xgboost
+matplotlib
+ttkbootstrap
+requests
 reportlab
 pypdf
-xgboost
-# optional, faster models: snapml (IBM Snap ML) or xgboost
+# On the LinuxONE VM use agent/setup_granite.sh and FrontEnd/setup_app.sh instead:
+# scikit-learn and scipy don't build with pip on s390x, so the scripts use Ubuntu's packages.

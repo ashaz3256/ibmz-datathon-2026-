@@ -238,7 +238,7 @@ def bills(w, p, t, week):
         out.append({"type": "payday loan", "amount": abs(recent[recent.category == "payday_loan"].amount.sum())})
     if spent("bnpl_repayment"):
         out.append({"type": "buy now pay later", "amount": spent("bnpl_repayment")})
-    return out
+    return [{"type": b["type"], "amount": round(float(b["amount"]), 2)} for b in out]
 
 
 # ---------- main entry point ----------

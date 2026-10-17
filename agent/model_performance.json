@@ -1,0 +1,10 @@
+{
+  "customers": 1000,
+  "seed": 7,
+  "roc_auc": 0.95,
+  "missed_rent_customers": 217,
+  "warned_before_missing_pct": 98.6,
+  "median_weeks_warning": 11.0,
+  "false_alarm_pct": 37.4,
+  "alert_rule": "risk >= 0.25 for 2 weeks in a row, after week 4"
+}
