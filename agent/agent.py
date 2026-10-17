@@ -56,7 +56,7 @@ Rules:
 - If a what-if scenario is given, mention it as encouragement.
 - Signpost the free services given. Do not give regulated debt advice;
   say they can get free, confidential help.
-- Start with "Hi <first name>,". Under 160 words. Plain English, no markdown headings."""
+- Start with "Hi <first name>,". Under 120 words. Plain English, no markdown headings."""
 
 # Phrases a reply must never contain. If Granite writes one, we use the template instead.
 BANNED_PHRASES = [
@@ -117,17 +117,31 @@ def build_facts(case):
 
 # ---------- the two ways of writing the message ----------
 
-def ask_granite(case):
-    r = requests.post(LLM_URL, timeout=LLM_TIMEOUT, json={
-        "messages": [
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": build_facts(case)},
-        ],
-        "temperature": 0.3,
-        "max_tokens": 300,
-    })
-    r.raise_for_status()
-    text = r.json()["choices"][0]["message"]["content"].strip()
+def stream_chat(messages, max_tokens=220, temperature=0.3, on_token=None):
+    """Sends a chat to Granite and reads the reply as it is written (streaming).
+    on_token(text) is called for each new piece, so a UI can show words as they appear.
+    Returns the full reply."""
+    pieces = []
+    with requests.post(LLM_URL, stream=True, timeout=(10, LLM_TIMEOUT), json={
+            "messages": messages, "temperature": temperature,
+            "max_tokens": max_tokens, "stream": True}) as r:
+        r.raise_for_status()
+        for line in r.iter_lines(decode_unicode=True):
+            if not line or not line.startswith("data:"):
+                continue
+            data = line[5:].strip()
+            if data == "[DONE]":
+                break
+            piece = json.loads(data)["choices"][0].get("delta", {}).get("content") or ""
+            if piece:
+                pieces.append(piece)
+                if on_token:
+                    on_token(piece)
+    return "".join(pieces).strip()
+
+
+def check_safe(text):
+    """Raises if the reply is too short or contains a banned phrase."""
     if len(text) < 40:
         raise ValueError("model reply too short")
     lowered = text.lower()
@@ -135,6 +149,14 @@ def ask_granite(case):
         if phrase in lowered:
             raise ValueError(f"unsafe reply (contained '{phrase}')")
     return text
+
+
+def ask_granite(case, on_token=None):
+    text = stream_chat([
+        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "user", "content": build_facts(case)},
+    ], max_tokens=220, temperature=0.3, on_token=on_token)
+    return check_safe(text)
 
 
 def template_message(case):
@@ -164,12 +186,13 @@ def template_message(case):
     return "\n\n".join(parts)
 
 
-def run_agent(case):
-    """Returns (message, source) where source is 'granite' or 'template'."""
+def run_agent(case, on_token=None):
+    """Returns (message, source) where source is 'granite' or 'template'.
+    on_token: optional callback to show Granite's words as they are written."""
     if case.get("risk_level", "").lower() in ("steady", "low"):
         return f"Hi {case.get('name', 'there')}, everything looks steady. No action needed.", "rule"
     try:
-        return ask_granite(case), "granite"
+        return ask_granite(case, on_token), "granite"
     except Exception as e:
         print(f"[agent] Granite not used ({type(e).__name__}: {e}), using template", file=sys.stderr)
         return template_message(case), "template"
