@@ -22,7 +22,7 @@ from reportlab.pdfgen import canvas
 BANK = "Northway Bank"   # fictional
 W, H = A4
 LEFT, RIGHT = 40, W - 40
-ROW = 14
+ROW = 13
 
 # Statement-style transaction codes (like real UK statements)
 CODE = {
@@ -33,7 +33,9 @@ CODE = {
     "overdraft_fee": "CHG",
 }
 
-COLS = {"date": LEFT, "desc": LEFT + 72, "out": 400, "in": 470, "bal": RIGHT}
+def line(d, desc, out, inn, bal):
+    """One transaction = one fixed-width text line, so pypdf reads it back as a single line."""
+    return f"{d:<12}{desc:<36}{out:>12}{inn:>12}{bal:>13}"
 
 
 def money(x):
@@ -53,13 +55,9 @@ def header(c, person_id, month_label, page):
     c.drawString(LEFT, H - 64, "Current Account Statement")
     c.drawRightString(RIGHT, H - 50, f"Customer {person_id:05d}")
     c.drawRightString(RIGHT, H - 64, f"Statement period: {month_label}   Page {page}")
-    c.setFont("Helvetica-Bold", 9)
+    c.setFont("Courier-Bold", 8.5)
     y = H - 96
-    c.drawString(COLS["date"], y, "Date")
-    c.drawString(COLS["desc"], y, "Description")
-    c.drawRightString(COLS["out"], y, "Paid out")
-    c.drawRightString(COLS["in"], y, "Paid in")
-    c.drawRightString(COLS["bal"], y, "Balance")
+    c.drawString(LEFT, y, line("Date", "Description", "Paid out", "Paid in", "Balance"))
     c.line(LEFT, y - 4, RIGHT, y - 4)
     return y - ROW - 4
 
@@ -81,10 +79,8 @@ def make_pdf(person_id, txns, path):
         label = date.fromisoformat(month + "-01").strftime("%B %Y")
         page = 1
         y = header(c, person_id, label, page)
-        c.setFont("Helvetica", 9)
-        c.drawString(COLS["date"], y, "")
-        c.drawString(COLS["desc"], y, "BALANCE BROUGHT FORWARD")
-        c.drawRightString(COLS["bal"], y, money(opening))
+        c.setFont("Courier", 8.5)
+        c.drawString(LEFT, y, line("", "BALANCE BROUGHT FORWARD", "", "", money(opening)))
         y -= ROW
         for r in rows.itertuples():
             if y < 50:
@@ -92,14 +88,11 @@ def make_pdf(person_id, txns, path):
                 c.showPage()
                 page += 1
                 y = header(c, person_id, label, page)
-                c.setFont("Helvetica", 9)
-            c.drawString(COLS["date"], y, date.fromisoformat(r.date).strftime("%d %b %Y"))
-            c.drawString(COLS["desc"], y, describe(r)[:48])
-            if r.amount < 0:
-                c.drawRightString(COLS["out"], y, money(-r.amount))
-            elif r.amount > 0:
-                c.drawRightString(COLS["in"], y, money(r.amount))
-            c.drawRightString(COLS["bal"], y, money(r.balance_after))
+                c.setFont("Courier", 8.5)
+            d = date.fromisoformat(r.date).strftime("%d %b %Y")
+            out = money(-r.amount) if r.amount < 0 else ""
+            inn = money(r.amount) if r.amount > 0 else ""
+            c.drawString(LEFT, y, line(d, describe(r)[:34], out, inn, money(r.balance_after)))
             y -= ROW
         opening = rows.balance_after.iloc[-1]
         footer(c)
