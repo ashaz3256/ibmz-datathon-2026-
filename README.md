@@ -114,4 +114,4 @@ Real bank data is private, so we generate **synthetic UK current-account transac
 | Arij Shahzad | GenAI agent, LinuxONE deployment, integration |
 | Sourov Aqib | Risk model (XGBoost) |
 | Ismail Azfar | Front end |
-| Tselmeg Ganzaa | |
+| Tselmeg Ganzaa | LLM and front end |
