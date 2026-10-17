@@ -5,7 +5,7 @@ import xgboost as xgb
 
 # 1. Load the model once when the module is imported
 model = xgb.XGBClassifier()
-model.load_model('model\\crisis_prediction_model.json')
+model.load_model('crisis_prediction_model.json')
 
 def get_crisis_predictions(weekly, people, transactions):
     xgb_model = model
@@ -68,7 +68,7 @@ def get_crisis_predictions(weekly, people, transactions):
     return results
 
 if __name__ == "__main__":
-    weekly = pd.read_csv('model\\weekly.csv')
-    transactions = pd.read_csv('model\\transactions.csv')
-    people = pd.read_csv('model\\people.csv')
+    weekly = pd.read_csv('weekly.csv')
+    transactions = pd.read_csv('transactions.csv')
+    people = pd.read_csv('people.csv')
     print(get_crisis_predictions(weekly, people, transactions))
