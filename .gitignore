@@ -1,0 +1,17 @@
+# Generated data (rebuild with data_gen/gen_personas.py)
+data/
+statements/
+*.csv
+
+# NEVER commit your LinuxONE SSH key
+*.pem
+*.key
+
+# Python / Jupyter
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+.venv/
+venv/
+.env
+.DS_Store
