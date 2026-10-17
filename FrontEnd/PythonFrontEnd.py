@@ -4,7 +4,7 @@ import tkinter as tk
 from tkinter import scrolledtext, filedialog
 
 window = tk.Tk()
-window.title("Financial Summary Analyser (NumPy & CSV)")
+window.title("Financial Summary & Dictionary Analyser")
 window.geometry("1100x850")
 
 ChatBox = scrolledtext.ScrolledText(window, width=110, height=35)
@@ -41,46 +41,64 @@ def ObtainFileData():
 
         # Convert rows into a 2D NumPy array of floats
         data = np.array([[float(val) for val in row] for row in rows], dtype=float)
-
-        # Map header names to column indices
         col_map = {name.strip(): idx for idx, name in enumerate(header)}
 
-        # Extract key NumPy arrays
-        balances = data[:, col_map['balance']]
-        incomes = data[:, col_map['monthly_income']]
-        total_spent = data[:, col_map['total_spent']]
-        tx_counts = data[:, col_map['tx_count']]
+        # Build a list of transaction dictionaries (e.g., aggregating monthly totals or category rows)
+        transactions = []
+        spend_categories = [name for name in header if name.startswith('spend_')]
 
-        # Compute NumPy statistical summaries
-        avg_balance = np.mean(balances)
-        max_balance = np.max(balances)
-        min_balance = np.min(balances)
-        
-        total_yearly_spent = np.sum(total_spent)
-        avg_monthly_spent = np.mean(total_spent)
-        total_yearly_income = np.sum(incomes)
-        avg_tx_count = np.mean(tx_counts)
+        for i, row in enumerate(data):
+            month_label = f"Month {i+1}"
+            balance_val = row[col_map['balance']]
+            
+            # Record income/salary entry
+            if 'spend_salary' in col_map and row[col_map['spend_salary']] > 0:
+                salary_val = row[col_map['spend_salary']]
+                transactions.append({
+                    "date": month_label,
+                    "name": "Salary / Income",
+                    "cost": salary_val,
+                    "balance": balance_val
+                })
 
-        # Display Summary
-        ChatBox.insert(tk.END, f"=== 1-Year Financial Mock Data Analysis ({len(data)} Months) ===\n\n")
-        
-        ChatBox.insert(tk.END, "--- Macro Financial Overview ---\n")
-        ChatBox.insert(tk.END, f"Total Yearly Income: £{total_yearly_income:,.2f}\n")
-        ChatBox.insert(tk.END, f"Total Yearly Spent: £{total_yearly_spent:,.2f}\n")
-        ChatBox.insert(tk.END, f"Average Monthly Balance: £{avg_balance:,.2f} (Min: £{min_balance:,.2f}, Max: £{max_balance:,.2f})\n")
-        ChatBox.insert(tk.END, f"Average Monthly Spending: £{avg_monthly_spent:,.2f}\n")
-        ChatBox.insert(tk.END, f"Average Monthly Transactions: {avg_tx_count:.1f}\n\n")
+            # Record spending categories as individual transaction items for the dictionary
+            for cat in spend_categories:
+                cost_val = row[col_map[cat]]
+                if cost_val > 0:
+                    item_name = cat.replace('spend_', '').replace('_', ' ').title()
+                    transactions.append({
+                        "date": month_label,
+                        "name": item_name,
+                        "cost": -cost_val, # Negative for money out
+                        "balance": balance_val
+                    })
 
-        # Category Breakdown (Columns starting with 'spend_')
-        ChatBox.insert(tk.END, "--- Annual Spending by Category (NumPy Aggregation) ---\n")
-        spend_categories = {name: col_map[name] for name in header if name.startswith('spend_')}
-        
-        for cat_name, col_idx in spend_categories.items():
-            category_data = data[:, col_idx]
-            annual_total = np.sum(category_data)
-            monthly_avg = np.mean(category_data)
-            display_name = cat_name.replace('spend_', '').replace('_', ' ').title()
-            ChatBox.insert(tk.END, f"{display_name:27} | Annual: £{annual_total:8,.2f} | Monthly Avg: £{monthly_avg:7,.2f}\n")
+        # Convert to NumPy arrays for vectorized calculations
+        np_dates = np.array([t["date"] for t in transactions], dtype=str)
+        np_names = np.array([t["name"] for t in transactions], dtype=str)
+        np_costs = np.array([t["cost"] for t in transactions], dtype=float)
+        np_balances = np.array([t["balance"] for t in transactions], dtype=float)
+
+        # Display results in ChatBox
+        ChatBox.insert(tk.END, f"Successfully mapped {len(transactions)} transaction records into dictionaries & NumPy arrays.\n\n")
+
+        ChatBox.insert(tk.END, "--- Sample of Stored Transaction Dictionaries (First 10) ---\n")
+        for t in transactions[:10]:
+            ChatBox.insert(tk.END, f"{t}\n")
+        ChatBox.insert(tk.END, "...\n\n")
+
+        ChatBox.insert(tk.END, "--- NumPy Vector Summary ---\n")
+        ChatBox.insert(tk.END, f"Total Inflows: £{np.sum(np_costs[np_costs > 0]):,.2f}\n")
+        ChatBox.insert(tk.END, f"Total Outflows: £{abs(np.sum(np_costs[np_costs < 0])):,.2f}\n")
+        ChatBox.insert(tk.END, f"Average Transaction Cost: £{np.mean(np_costs):,.2f}\n\n")
+
+        # Totals by item using NumPy masking
+        ChatBox.insert(tk.END, "--- Totals by Category Name ---\n")
+        unique_names = np.unique(np_names)
+        for name in unique_names:
+            mask = (np_names == name)
+            cat_total = np.sum(np_costs[mask])
+            ChatBox.insert(tk.END, f"{name:25} | Total: £{cat_total:+10,.2f}\n")
 
     except Exception as e:
         ChatBox.insert(tk.END, f"Error: {type(e).__name__}: {e}\nPath tried: {path}")
@@ -89,7 +107,7 @@ def ObtainFileData():
 window.columnconfigure(0, weight=1)
 window.rowconfigure(1, weight=1)
 
-AnalyseButton = tk.Button(window, text="Load Financial Mock Data CSV", command=ObtainFileData)
+AnalyseButton = tk.Button(window, text="Load & Build Transaction Dictionaries", command=ObtainFileData)
 AnalyseButton.grid(row=0, column=0, sticky="w", padx=10, pady=10)
 
 UserInput = tk.Entry(window)
