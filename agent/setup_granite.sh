@@ -15,7 +15,7 @@ fi
 
 echo "== 1/4 installing packages =="
 sudo apt update
-sudo apt install -y git cmake build-essential libopenblas-dev python3-pip python3-venv
+sudo apt install -y git cmake build-essential pkg-config libopenblas-dev python3-pip python3-venv
 
 echo "== 2/4 building llama.cpp (10-15 min) =="
 [ -d "$LLAMA" ] || git clone https://github.com/ggml-org/llama.cpp "$LLAMA"
