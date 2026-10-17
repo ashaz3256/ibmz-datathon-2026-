@@ -9,7 +9,7 @@ from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolb
 
 from llama_cpp import Llama
 
-# Initialize local Qwen model in background thread or startup
+# Initialize local Qwen model in background
 print("Loading local Qwen model via llama_cpp...")
 try:
     llm = Llama.from_pretrained(
@@ -188,22 +188,47 @@ def ProcessFileThreaded():
                     window.after(0, lambda: StatsBox.insert(tk.END, "CSV file is empty or missing headers.\n"))
                     return
 
-                col_map = {name.strip(): idx for idx, name in enumerate(header)}
+                # Clean header names (strip spaces and lowercase for robust lookup)
+                clean_header = [h.strip().lower() for h in header]
+                col_map = {name: idx for idx, name in enumerate(clean_header)}
                 
                 for row in reader:
                     if not row or len(row) < len(header):
                         continue
                     
-                    date_val = row[col_map['date']].strip() if 'date' in col_map else "N/A"
-                    merchant_val = row[col_map['merchant']].strip() if 'merchant' in col_map else row[1].strip()
+                    # Safely retrieve values based on header names or fallback to safe indexes
+                    date_val = row[col_map['date']].strip() if 'date' in col_map else (row[1] if len(row) > 1 else "N/A")
                     
+                    # Extract merchant / description
+                    merchant_val = "Unknown"
+                    for m_key in ['merchant', 'name', 'description', 'item']:
+                        if m_key in col_map:
+                            merchant_val = row[col_map[m_key]].strip()
+                            break
+                    if merchant_val == "Unknown" and len(row) > 1:
+                        merchant_val = row[1].strip()
+
+                    # Extract or Auto-Categorize Category
                     if 'category' in col_map and row[col_map['category']].strip():
                         category_val = row[col_map['category']].strip()
                     else:
                         category_val = AIAutoCategorize(merchant_val)
 
-                    cost_val = float(row[col_map['amount']]) if 'amount' in col_map else float(row[2])
-                    balance_val = float(row[col_map['balance_after']]) if 'balance_after' in col_map else float(row[3])
+                    # Extract Amount (Cost) safely, stripping currency symbols if present
+                    cost_val = 0.0
+                    for a_key in ['amount', 'cost', 'price']:
+                        if a_key in col_map:
+                            val_str = row[col_map[a_key]].strip().replace("£", "").replace(",", "")
+                            cost_val = float(val_str)
+                            break
+                    
+                    # Extract Balance After safely
+                    balance_val = 0.0
+                    for b_key in ['balance_after', 'balance']:
+                        if b_key in col_map:
+                            val_str = row[col_map[b_key]].strip().replace("£", "").replace(",", "")
+                            balance_val = float(val_str)
+                            break
 
                     transactions.append({
                         "date": date_val,
@@ -214,10 +239,9 @@ def ProcessFileThreaded():
                     })
 
             if not transactions:
-                window.after(0, lambda: StatsBox.insert(tk.END, "No transaction rows found in the CSV file.\n"))
+                window.after(0, lambda: StatsBox.insert(tk.END, "No valid transaction rows found in the CSV file.\n"))
                 return
 
-            # Update UI on main thread safely using window.after
             def update_ui():
                 for row in transaction_table.get_children():
                     transaction_table.delete(row)
@@ -275,11 +299,14 @@ def ProcessFileThreaded():
 
             window.after(0, update_ui)
 
-        except Exception as e:
-            window.after(0, lambda: StatsBox.insert(tk.END, f"Error: {type(e).__name__}: {e}\nPath tried: {path}\n"))
+        except Exception as ex:
+            err_type = type(ex).__name__
+            err_msg = str(ex)
+            window.after(0, lambda: StatsBox.insert(tk.END, f"Error: {err_type}: {err_msg}\nPath tried: {path}\n"))
 
     threading.Thread(target=background_task, daemon=True).start()
 
+    
 def TriggerPrompt(prompt_text):
     """Instantly injects and runs a preset prompt."""
     UserInput.delete(0, tk.END)
@@ -323,8 +350,10 @@ def HandleAIQuery(event=None):
                 AIBox.insert(tk.END, f"AI Professional Report:\n{response_text}\n\n" + "="*60 + "\n")
 
             window.after(0, update_ai_box)
-        except Exception as e:
-            window.after(0, lambda: AIBox.insert(tk.END, f"Error generating AI response: {e}\n"))
+        except Exception as ex:
+            err_type = type(ex).__name__
+            err_msg = str(ex)
+            window.after(0, lambda: AIBox.insert(tk.END, f"Error generating AI response: {err_type}: {err_msg}\n"))
 
     threading.Thread(target=ai_background_task, daemon=True).start()
 
