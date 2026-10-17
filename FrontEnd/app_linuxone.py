@@ -63,7 +63,7 @@ print("Granite online" if check_granite() else
 
 # Initialize ttkbootstrap themed window with dark executive look
 window = ttk_bs.Window(themename="cyborg")
-window.title("Financial Early-Warning Suite - IBM Granite on LinuxONE")
+window.title("Financial Early-Warning Suite - Local ML + IBM Granite on LinuxONE")
 window.geometry("1500x1020")
 
 # IBM Design Language Colour Palette
@@ -87,7 +87,7 @@ main_frame.rowconfigure(2, weight=1)
 # Header Title Block
 title_label = ttk_bs.Label(
     main_frame, 
-    text="FINANCIAL EARLY-WARNING SUITE  |  IBM GRANITE ON LINUXONE", 
+    text="FINANCIAL EARLY-WARNING SUITE  |  LOCAL ML + IBM GRANITE ON LINUXONE", 
     font=("Segoe UI", 18, "bold"),
     bootstyle="inverse"
 )
@@ -224,7 +224,11 @@ def ProcessFileThreaded(path=None, person_id=None):
         person_id = _customer_from_box()
 
     StatsBox.delete("1.0", tk.END)
-    StatsBox.insert(tk.END, "Processing CSV and running AI Auto-Categorizer in background... Please wait...\n")
+    StatsBox.insert(tk.END, "Processing CSV, running AI Auto-Categorizer & Local ML Predictor... Please wait...\n")
+    AnalyseButton.config(state="disabled", text="Processing...")   # from Ismail's version
+
+    def loading_done():
+        window.after(0, lambda: AnalyseButton.config(state="normal", text="Load Transactions CSV & Launch Suite"))
 
     def background_task():
         global current_financial_context
@@ -237,6 +241,7 @@ def ProcessFileThreaded(path=None, person_id=None):
                 header = next(reader, None)
                 if not header:
                     window.after(0, lambda: StatsBox.insert(tk.END, "CSV file is empty or missing headers.\n"))
+                    loading_done()
                     return
 
                 # Clean header names (strip spaces and lowercase for robust lookup)
@@ -294,10 +299,12 @@ def ProcessFileThreaded(path=None, person_id=None):
                         "name": f"{merchant_val} ({category_val})",
                         "category": category_val,
                         "cost": cost_val,
-                        "balance": balance_val
+                        "balance": balance_val,
+                        "week": int(float(row[col_map['week']])) if 'week' in col_map and row[col_map['week']].strip() else None,
                     })
 
             if not transactions:
+                loading_done()
                 window.after(0, lambda: StatsBox.insert(tk.END, "No valid transaction rows found in the CSV file.\n"))
                 return
 
@@ -366,13 +373,21 @@ def ProcessFileThreaded(path=None, person_id=None):
                 tx_df['amount'] = tx_df['amount'].astype(float)
                 window.after(0, lambda: RunRiskAssessment(chosen_id, tx_df))
             else:
-                window.after(0, lambda: RiskHeadline.config(
-                    text="Risk score needs the team's transactions format (person_id, week, category, amount)"))
+                # Ismail's method: any bank CSV -> estimate income/rent -> Sourov's model
+                try:
+                    est = risk_bridge.estimate_any_csv([
+                        {"date": t["date"], "amount": t["cost"], "category": t["category"],
+                         "balance_after": t["balance"], "week": t["week"]} for t in transactions])
+                    window.after(0, lambda: ShowEstimatedML(est))
+                except Exception as ml_err:
+                    window.after(0, lambda e=ml_err: ShowMLStats(error=f"{type(e).__name__}: {e}"))
+            loading_done()
 
         except Exception as ex:
             err_type = type(ex).__name__
             err_msg = str(ex)
             window.after(0, lambda: StatsBox.insert(tk.END, f"Error: {err_type}: {err_msg}\nPath tried: {path}\n"))
+            loading_done()
 
     threading.Thread(target=background_task, daemon=True).start()
 
@@ -552,6 +567,46 @@ def RunRiskAssessment(person_id, tx_df=None, week=None):
 ML_HEADER = "=== LOCAL ML RISK MODEL (Sourov's XGBoost) ==="
 
 
+def _set_ml_context(line):
+    """Ismail's version gave the ML score to the chat AI; here it goes to Granite."""
+    global current_financial_context
+    keep = [l for l in current_financial_context.split("\n") if not l.startswith("- Local ML Crisis Probability")]
+    current_financial_context = "\n".join(keep) + "\n" + line
+
+
+def ShowEstimatedML(est):
+    """Ismail's any-CSV result: estimated inputs, so it is labelled as an estimate everywhere."""
+    global current_case
+    current_case = None  # a different file: don't let the chat talk about the previous customer
+    lvl = est["risk_level"]
+    RiskHeadline.config(text=f"ESTIMATED from this CSV only  |  week {est['week']}  |  {lvl.upper()}  "
+                             f"({est['risk_score']:.2f})  -  load a team customer for the full plan",
+                        bootstyle=f"inverse-{LEVEL_STYLE.get(lvl, 'secondary')}")
+    start = StatsBox.search(ML_HEADER, "1.0")
+    if start:
+        StatsBox.delete(start, tk.END)
+    e = est["estimated"]
+    out = [f"\n{ML_HEADER}\n\n",
+           f"• ML Status:                         Loaded - running locally on {platform.machine()} "
+           f"({'IBM LinuxONE' if platform.machine() == 's390x' else 'not LinuxONE'}), ESTIMATED inputs\n",
+           f"• Local ML Crisis Probability Score: {est['risk_score']:.4f} / 1.0  (latest week {est['week']}, {lvl})\n",
+           f"• Highest weekly score:              {est['max_score']:.4f} / 1.0  (week {est['max_week']})\n",
+           f"• Estimated from this CSV:           income £{e['monthly_income']:,.0f}/month, "
+           f"rent £{e['monthly_rent']:,.0f}/month (from {e['rent_from']}), overdraft limit £{e['overdraft_limit']:,.0f}\n",
+           "  (this CSV has no income/rent/overdraft details, so treat the score as a rough guide)\n"]
+    if est["top_reasons"]:
+        out.append("• Main reasons:                      " + "; ".join(est["top_reasons"]) + "\n")
+    out.append("\n--- Weekly Model Predictions (last 12 weeks) ---\n")
+    for _, wp in est["weekly"].tail(12).iterrows():
+        bal = f"£{wp['balance']:,.2f}" if "balance" in wp else "n/a"
+        flag = int(wp["high_risk_flag"]) if "high_risk_flag" in wp else int(wp.crisis_probability > 0.7)
+        out.append(f"Week {int(wp.week):>2}: Balance {bal:>11} | Crisis Prob: {wp.crisis_probability:6.2%} | "
+                   f"{risk_bridge.level_for(wp.crisis_probability):<14} | High Risk: {flag}\n")
+    StatsBox.insert(tk.END, "".join(out))
+    _set_ml_context(f"- Local ML Crisis Probability Score: {est['risk_score']:.4f} (Scale 0 to 1, "
+                    f"ESTIMATED from this CSV, {lvl}). Main reasons: {'; '.join(est['top_reasons']) or 'none'}")
+
+
 def ShowMLStats(case=None, weekly_risk=None, error=None):
     """Ismail's ML Status / Local ML Crisis Probability Score section, in the Advanced NumPy Metrics tab.
     Uses the same real-data scores as the Risk tab. Replaces the previous section instead of stacking."""
@@ -584,6 +639,9 @@ def ShowMLStats(case=None, weekly_risk=None, error=None):
             out.append(f"Week {int(wp.week):>2}: Balance {bal:>11} | Crisis Prob: {wp.crisis_probability:6.2%} | "
                        f"{risk_bridge.level_for(wp.crisis_probability):<14} | High Risk: {flag}{here}\n")
     StatsBox.insert(tk.END, "".join(out))
+    if case is not None:
+        _set_ml_context(f"- Local ML Crisis Probability Score: {case['risk_score']:.4f} (Scale 0 to 1, "
+                        f"week {case['week']}, {case['risk_level']})")
 
 
 def ShowRisk(case, weekly_risk):

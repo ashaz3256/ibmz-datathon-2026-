@@ -280,6 +280,45 @@ def score_person(person_id, week=None, data_dir=DATA_DIR, transactions=None):
     return case, weekly_risk
 
 
+def estimate_any_csv(rows):
+    """Ismail's method for scoring ANY transactions CSV (one person, no income/rent details):
+    estimate the model's inputs from the transactions alone, then run Sourov's model.
+    rows: list of dicts with date, amount, category, balance_after and optionally week.
+    Scores are estimates: the model was trained on real income, rent and overdraft figures."""
+    tx = pd.DataFrame(rows)
+    tx["person_id"] = 1
+    if "week" not in tx or tx["week"].isna().all() or (tx["week"] == 0).all():
+        dates = pd.to_datetime(tx["date"], errors="coerce", format="ISO8601")  # 2026-01-05
+        if dates.isna().mean() > 0.5:
+            dates = pd.to_datetime(tx["date"], errors="coerce", dayfirst=True)  # UK style 05/01/2026
+        tx["week"] = ((dates - dates.min()).dt.days // 7).fillna(0).astype(int) if dates.notna().any() else 0
+    tx["week"] = tx["week"].astype(int)
+    tx["category"] = tx["category"].astype(str).str.strip().str.lower().str.replace(" ", "_")
+    weeks = max(tx.week.nunique(), 1)
+    per_month = 52 / 12 / weeks
+    income = tx.amount[tx.amount > 0].sum() * per_month
+    rent_rows = tx[tx.category.str.contains("rent")]
+    # rent from rent payments if there are any; otherwise Ismail's fallback (all spending)
+    rent = (abs(rent_rows.amount.sum()) if len(rent_rows) else abs(tx.amount[tx.amount < 0].sum())) * per_month
+    weekly = (tx.sort_values("week").groupby("week").agg(balance=("balance_after", "last")).reset_index())
+    weekly["person_id"] = 1
+    people = pd.DataFrame([{"person_id": 1, "monthly_income": float(income),
+                            "monthly_rent": float(rent), "overdraft_limit": 500.0}])  # Ismail's default limit
+    res, X = _score(weekly, people, tx)
+    last = len(res) - 1
+    top = res.loc[res.crisis_probability.idxmax()]
+    return {
+        "risk_score": float(res.crisis_probability.iloc[last]), "week": int(res.week.iloc[last]),
+        "risk_level": level_for(float(res.crisis_probability.iloc[last])),
+        "max_score": float(top.crisis_probability), "max_week": int(top.week),
+        "top_reasons": top_reasons(X, last),
+        "estimated": {"monthly_income": round(float(income), 2), "monthly_rent": round(float(rent), 2),
+                      "rent_from": "rent payments" if len(rent_rows) else "all spending (no rent found)",
+                      "overdraft_limit": 500.0},
+        "weekly": res[[c for c in ("week", "balance", "crisis_probability", "high_risk_flag") if c in res]],
+    }
+
+
 def demo_people(data_dir=DATA_DIR, n=3):
     """A few interesting customers to demo: ones who were flagged before they missed rent."""
     _, people, _ = load_data(data_dir)
