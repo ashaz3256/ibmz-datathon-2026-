@@ -7,51 +7,66 @@ import xgboost as xgb
 model = xgb.XGBClassifier()
 model.load_model('model\\crisis_prediction_model.json')
 
-def get_crisis_predictions(weekly_df, people_df, transactions_df):
-    """
-    Takes raw dataframes, engineers features, and returns a dataframe with risk probabilities.
-    """
-    # Aggregate transactions
-    tx_agg = transactions_df.groupby(['person_id', 'week']).agg(
-        total_spent=('amount', 'sum'),
-        tx_count=('amount', 'count')
-    ).reset_index()
+def get_crisis_predictions(weekly, people, transactions, xgb_model):
+    # Safety check for memory blowout
+    if len(people) > 1:
+        raise ValueError("people_df has more than 1 row! Use only single-person data.")
 
-    tx_cat = transactions_df.pivot_table(
-        index=['person_id', 'week'], columns='category', 
-        values='amount', aggfunc='sum', fill_value=0
-    ).reset_index()
-    tx_cat.columns = [f"spend_{c}" if c not in ['person_id', 'week'] else c for c in tx_cat.columns]
+    # 1. Aggregate transactions purely by week
+    if not transactions.empty:
+        tx_agg = transactions.groupby('week').agg(
+            total_spent=('amount', 'sum'), 
+            tx_count=('amount', 'count')
+        ).reset_index()
 
-    # Merge data
-    df = pd.merge(weekly_df, people_df, on='person_id', how='left')
-    df = pd.merge(df, tx_agg, on=['person_id', 'week'], how='left')
-    df = pd.merge(df, tx_cat, on=['person_id', 'week'], how='left')
+        tx_cat = transactions.pivot_table(
+            index='week', columns='category', values='amount', aggfunc='sum', fill_value=0
+        ).reset_index()
+        tx_cat.columns = [f'spend_{c}' if c != 'week' else c for c in tx_cat.columns]
+    else:
+        tx_agg = pd.DataFrame(columns=['week', 'total_spent', 'tx_count'])
+        tx_cat = pd.DataFrame(columns=['week'])
 
-    # Handle missing transaction columns the model expects
-    expected_features = model.feature_names_in_ 
+    # 2. Assign demographic info safely directly to weekly data
+    df = weekly.copy()
+    person_data = people.iloc[0].to_dict()
+    for col, val in person_data.items():
+        df[col] = val
+
+    # 3. Merge transaction summaries
+    df = pd.merge(df, tx_agg, on='week', how='left')
+    df = pd.merge(df, tx_cat, on='week', how='left')
+
+    # 4. Align features with the model's expectations
+    expected_features = list(xgb_model.feature_names_in_)
     for col in expected_features:
-        if col not in df.columns and col.startswith('spend_'):
+        if col.startswith('spend_') and col not in df.columns:
             df[col] = 0.0
-            
-    tx_cols = ['total_spent', 'tx_count'] + [c for c in df.columns if str(c).startswith('spend_')]
-    existing_tx_cols = [c for c in tx_cols if c in df.columns]
-    df[existing_tx_cols] = df[existing_tx_cols].fillna(0)
 
-    # Calculate financial ratios
+    tx_cols = ['total_spent', 'tx_count'] + [c for c in df.columns if str(c).startswith('spend_')]
+    df[tx_cols] = df[tx_cols].fillna(0.0)
+
+    # 5. Financial ratios
     df['rent_to_income_ratio'] = np.where(df['monthly_income'] > 0, df['monthly_rent'] / df['monthly_income'], np.nan)
     df['credit_utilization'] = np.where(df['overdraft_limit'] > 0, df['balance'] / df['overdraft_limit'], np.nan)
     df['available_liquidity'] = df['balance'] + df['overdraft_limit']
 
-    # Ensure column order matches the trained model
+    # 6. Extract exact feature matrix
     X_predict = df[expected_features]
 
-    # Predict probabilities
-    probabilities = model.predict_proba(X_predict)[:, 1]
+    # 7. Predict
+    probabilities = xgb_model.predict_proba(X_predict)[:, 1]
 
-    # Create the results dataframe to return
-    results = df[['person_id', 'week', 'balance']].copy()
+    # 8. Output results
+    results = weekly[['week', 'balance']].copy()
+    if 'missed_rent' in weekly.columns:
+        results['missed_rent'] = weekly['missed_rent']
     results['crisis_probability'] = probabilities
-    results['high_risk_flag'] = (probabilities > 0.70).astype(int) # Custom threshold
-    
+    results['high_risk_flag'] = (probabilities > 0.70).astype(int)
+
     return results
+
+weekly = pd.read_csv('model\\weekly.csv')
+transactions = pd.read_csv('model\\transactions.csv')
+people = pd.read_csv('model\\people.csv')
+print(get_crisis_predictions(weekly, people, transactions, model))
